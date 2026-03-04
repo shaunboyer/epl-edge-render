@@ -114,7 +114,7 @@
             style="background:var(--bg-base); border-color:var(--border2); color:var(--text-1)">
             <option value="us,uk,eu,au">All Regions</option>
             <option value="uk,eu">UK / Europe</option>
-            <option value="us">US Only</option>
+            <option value="us" selected>US Only</option>
             <option value="us,uk">US + UK</option>
           </select>
         </div>
@@ -388,7 +388,7 @@ const HISTORY_KEY = 'eplEdgeOddsHistory';
 const FORM_KEY    = 'eplEdgeFormCache';
 
 let config = {
-  regions:         'us,uk,eu,au',
+  regions:         'us',
   minEdge:         0,
   refreshInterval: 30,
 };
@@ -411,11 +411,17 @@ let state = {
 const avg   = arr => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
-function decToAmerican(d) {
-  return d >= 2 ? `+${Math.round((d - 1) * 100)}` : `${Math.round(-100 / (d - 1))}`;
+// Convert American odds to decimal (for probability math)
+function americanToDecimal(american) {
+  if (american === null || american === undefined) return 1;
+  return american >= 0 ? (american / 100) + 1 : (100 / Math.abs(american)) + 1;
 }
-function fmtDecimal(d)  { return d ? d.toFixed(2) : '—'; }
-function fmtPct(p)      { return isNaN(p) ? '—' : `${(p * 100).toFixed(1)}%`; }
+// Format American odds for display: +150, -110
+function fmtOdds(american) {
+  if (american === null || american === undefined || isNaN(american)) return '—';
+  return american >= 0 ? `+${american}` : `${american}`;
+}
+function fmtPct(p) { return isNaN(p) ? '—' : `${(p * 100).toFixed(1)}%`; }
 
 function fmtDate(iso) {
   const d = new Date(iso);
@@ -460,7 +466,7 @@ function saveFormCache() {
 
 // ─── API calls (go through Express proxy) ────────────────────
 async function fetchOdds() {
-  const res = await fetch(`/api/odds?regions=${config.regions}&markets=h2h&oddsFormat=decimal`);
+  const res = await fetch(`/api/odds?regions=${config.regions}&markets=h2h&oddsFormat=american`);
   state.apiCallsLeft = res.headers.get('x-requests-remaining');
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -512,9 +518,10 @@ function calculateEdge(game) {
   const { bookmakers, home_team, away_team } = game;
   if (!bookmakers?.length) return null;
 
-  const noVigSets = [];
-  const bestOdds  = { home: 0, draw: 0, away: 0 };
-  const bestBooks = { home: '', draw: '', away: '' };
+  const noVigSets  = [];
+  const bestOdds   = { home: null, draw: null, away: null };  // American format
+  const bestDecOdds= { home: 0,    draw: 0,    away: 0    };  // decimal for comparison
+  const bestBooks  = { home: '', draw: '', away: '' };
   let   totalBooks = 0;
 
   for (const bk of bookmakers) {
@@ -524,11 +531,16 @@ function calculateEdge(game) {
     const a = mkt.outcomes.find(o => o.name === away_team);
     const d = mkt.outcomes.find(o => o.name === 'Draw');
     if (!h || !a || !d) continue;
-    noVigSets.push(calculateNoVig(h.price, d.price, a.price));
+    // Convert American → decimal for probability math
+    const hDec = americanToDecimal(h.price);
+    const dDec = americanToDecimal(d.price);
+    const aDec = americanToDecimal(a.price);
+    noVigSets.push(calculateNoVig(hDec, dDec, aDec));
     totalBooks++;
-    if (h.price > bestOdds.home) { bestOdds.home = h.price; bestBooks.home = bk.title; }
-    if (d.price > bestOdds.draw) { bestOdds.draw = d.price; bestBooks.draw = bk.title; }
-    if (a.price > bestOdds.away) { bestOdds.away = a.price; bestBooks.away = bk.title; }
+    // Track best odds by comparing decimal equivalents
+    if (hDec > bestDecOdds.home) { bestDecOdds.home = hDec; bestOdds.home = h.price; bestBooks.home = bk.title; }
+    if (dDec > bestDecOdds.draw) { bestDecOdds.draw = dDec; bestOdds.draw = d.price; bestBooks.draw = bk.title; }
+    if (aDec > bestDecOdds.away) { bestDecOdds.away = aDec; bestOdds.away = a.price; bestBooks.away = bk.title; }
   }
 
   if (!noVigSets.length) return null;
@@ -546,10 +558,11 @@ function calculateEdge(game) {
     away: clamp(consensus.away - 0.0125, 0, 1),
   };
 
+  // Break-even uses decimal equivalent of best American odds
   const breakEven = {
-    home: bestOdds.home > 0 ? 1 / bestOdds.home : 1,
-    draw: bestOdds.draw > 0 ? 1 / bestOdds.draw : 1,
-    away: bestOdds.away > 0 ? 1 / bestOdds.away : 1,
+    home: bestDecOdds.home > 0 ? 1 / bestDecOdds.home : 1,
+    draw: bestDecOdds.draw > 0 ? 1 / bestDecOdds.draw : 1,
+    away: bestDecOdds.away > 0 ? 1 / bestDecOdds.away : 1,
   };
 
   const edge = {
@@ -642,8 +655,8 @@ function renderTopPicks(games) {
         <div class="flex items-end justify-between">
           <div>
             <p class="text-xs mb-0.5" style="color:var(--text-3)">Best Odds</p>
-            <p class="mono font-bold text-lg text-white">${fmtDecimal(bet.odds)}</p>
-            <p class="mono text-xs" style="color:var(--text-2)">${decToAmerican(bet.odds)} · ${bet.book}</p>
+            <p class="mono font-bold text-lg text-white">${fmtOdds(bet.odds)}</p>
+            <p class="mono text-xs" style="color:var(--text-2)">${bet.book}</p>
           </div>
           <div class="text-right">
             <p class="text-xs mb-0.5" style="color:var(--text-3)">Edge</p>
@@ -709,7 +722,7 @@ function renderFixtures(games) {
       const arrow = mv.dir === 'up' ? `<span class="move-up text-xs">↑</span>` : mv.dir === 'down' ? `<span class="move-down text-xs">↓</span>` : '';
       return `<td class="px-3 py-3 text-center">
         <span class="mono text-sm font-${highlight ? 'bold' : 'normal'}" style="color:${highlight ? 'var(--text-1)' : 'var(--text-2)'}">
-          ${fmtDecimal(odds)} ${arrow}
+          ${fmtOdds(odds)} ${arrow}
         </span>
       </td>`;
     }
@@ -785,7 +798,7 @@ async function showDetail(gameId) {
             </div>
             <span class="mono text-xs w-12 text-right" style="color:var(--text-2)">${fmtPct(edge.model[o.key])}</span>
           </div>
-          <span class="text-xs" style="color:var(--text-3)">Best: <span class="mono">${fmtDecimal(o.odds)}</span> (${decToAmerican(o.odds)}) @ ${o.book}</span>
+          <span class="text-xs" style="color:var(--text-3)">Best: <span class="mono">${fmtOdds(o.odds)}</span> @ ${o.book}</span>
         </div>
         <span class="ml-2 px-2.5 py-1 rounded-lg text-xs font-bold mono ${tier.cls}">${o.e >= 0 ? '+' : ''}${o.e.toFixed(1)}%</span>
       </div>`;
@@ -803,9 +816,9 @@ async function showDetail(gameId) {
     return `
       <tr class="border-t" style="border-color:var(--border)">
         <td class="py-2 pr-4 text-sm font-medium">${bk.title}</td>
-        <td class="py-2 px-3 text-center mono text-sm" style="color:${edge.bestBooks.home === bk.title ? 'var(--green)' : 'var(--text-2)'}; font-weight:${edge.bestBooks.home === bk.title ? 'bold' : 'normal'}">${fmtDecimal(h)}</td>
-        <td class="py-2 px-3 text-center mono text-sm" style="color:${edge.bestBooks.draw === bk.title ? 'var(--green)' : 'var(--text-2)'}; font-weight:${edge.bestBooks.draw === bk.title ? 'bold' : 'normal'}">${fmtDecimal(d)}</td>
-        <td class="py-2 px-3 text-center mono text-sm" style="color:${edge.bestBooks.away === bk.title ? 'var(--green)' : 'var(--text-2)'}; font-weight:${edge.bestBooks.away === bk.title ? 'bold' : 'normal'}">${fmtDecimal(a)}</td>
+        <td class="py-2 px-3 text-center mono text-sm" style="color:${edge.bestBooks.home === bk.title ? 'var(--green)' : 'var(--text-2)'}; font-weight:${edge.bestBooks.home === bk.title ? 'bold' : 'normal'}">${fmtOdds(h)}</td>
+        <td class="py-2 px-3 text-center mono text-sm" style="color:${edge.bestBooks.draw === bk.title ? 'var(--green)' : 'var(--text-2)'}; font-weight:${edge.bestBooks.draw === bk.title ? 'bold' : 'normal'}">${fmtOdds(d)}</td>
+        <td class="py-2 px-3 text-center mono text-sm" style="color:${edge.bestBooks.away === bk.title ? 'var(--green)' : 'var(--text-2)'}; font-weight:${edge.bestBooks.away === bk.title ? 'bold' : 'normal'}">${fmtOdds(a)}</td>
         <td class="py-2 px-3 text-center text-xs mono" style="color:var(--text-3)">${vig}%</td>
       </tr>`;
   }).join('');
