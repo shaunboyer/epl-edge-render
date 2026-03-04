@@ -1,0 +1,1041 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EPL Edge Finder</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+    :root {
+      --bg-base:    #080d1a;
+      --bg-card:    #0d1427;
+      --bg-card2:   #111b36;
+      --border:     #1c2a4a;
+      --border2:    #243356;
+      --green:      #00e87a;
+      --green-dim:  #00b85e;
+      --yellow:     #f5c518;
+      --red:        #ff4757;
+      --blue:       #3b82f6;
+      --text-1:     #e8edf8;
+      --text-2:     #8892b0;
+      --text-3:     #4a5580;
+    }
+
+    * { box-sizing: border-box; }
+    html { font-family: 'Inter', sans-serif; }
+    body { background: var(--bg-base); color: var(--text-1); min-height: 100vh; }
+    .mono { font-family: 'JetBrains Mono', monospace; }
+
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg-base); }
+    ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+    .edge-great  { background: rgba(0,232,122,0.15);  color: #00e87a; border: 1px solid rgba(0,232,122,0.3); }
+    .edge-good   { background: rgba(134,239,172,0.12); color: #86efac; border: 1px solid rgba(134,239,172,0.25); }
+    .edge-slight { background: rgba(245,197,24,0.12);  color: #f5c518; border: 1px solid rgba(245,197,24,0.25); }
+    .edge-none   { background: rgba(255,71,87,0.10);   color: #ff4757; border: 1px solid rgba(255,71,87,0.20); }
+
+    .pick-card-great  { box-shadow: 0 0 30px rgba(0,232,122,0.12), 0 4px 20px rgba(0,0,0,0.4); border-color: rgba(0,232,122,0.3) !important; }
+    .pick-card-good   { box-shadow: 0 0 30px rgba(134,239,172,0.08), 0 4px 20px rgba(0,0,0,0.4); border-color: rgba(134,239,172,0.2) !important; }
+    .pick-card-slight { box-shadow: 0 0 30px rgba(245,197,24,0.08), 0 4px 20px rgba(0,0,0,0.4); border-color: rgba(245,197,24,0.2) !important; }
+
+    .spinner { animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .fixture-row:hover { background: rgba(30,42,74,0.6); transition: background 0.15s; }
+
+    .pulse-dot { animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+    .tooltip { position: relative; }
+    .tooltip .tip {
+      display: none; position: absolute; bottom: calc(100% + 6px); left: 50%;
+      transform: translateX(-50%); background: #1e2d52; border: 1px solid var(--border2);
+      color: var(--text-1); font-size: 11px; white-space: nowrap;
+      padding: 5px 10px; border-radius: 6px; z-index: 100;
+    }
+    .tooltip:hover .tip { display: block; }
+
+    .skeleton {
+      background: linear-gradient(90deg, var(--bg-card2) 25%, var(--border) 50%, var(--bg-card2) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.4s infinite;
+      border-radius: 6px;
+    }
+    @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+    .edge-bar { transition: width 0.6s ease; }
+    .move-up   { color: var(--green); }
+    .move-down { color: var(--red); }
+    .move-flat { color: var(--text-3); }
+    .tab-btn.active { border-bottom: 2px solid var(--green); color: var(--text-1); }
+    .tab-btn { border-bottom: 2px solid transparent; transition: all 0.15s; }
+  </style>
+</head>
+<body>
+
+<!-- ============================================================
+     SETTINGS MODAL (no API keys — those live server-side)
+============================================================ -->
+<div id="settingsModal" class="fixed inset-0 z-50 flex items-center justify-center hidden" style="background:rgba(8,13,26,0.85); backdrop-filter:blur(4px)">
+  <div class="w-full max-w-md mx-4 rounded-2xl border" style="background:var(--bg-card); border-color:var(--border2)">
+    <div class="flex items-center justify-between p-6 border-b" style="border-color:var(--border)">
+      <div>
+        <h2 class="text-lg font-bold text-white">Dashboard Settings</h2>
+        <p class="text-sm mt-0.5" style="color:var(--text-2)">API keys are set as environment variables on Render</p>
+      </div>
+      <button id="closeSettings" class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/5 transition" style="color:var(--text-2)">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+
+    <div class="p-6 space-y-5">
+      <!-- Server status indicator -->
+      <div class="flex items-center gap-3 px-4 py-3 rounded-xl border" style="background:var(--bg-card2); border-color:var(--border)">
+        <span id="serverStatusDot" class="w-2 h-2 rounded-full pulse-dot" style="background:var(--green)"></span>
+        <div>
+          <p class="text-sm font-medium text-white">Server Connected</p>
+          <p class="text-xs" style="color:var(--text-2)">API keys managed via Render environment variables</p>
+        </div>
+        <span id="apiCallsBadge2" class="ml-auto text-xs mono px-2 py-1 rounded-lg" style="background:var(--bg-base); color:var(--text-2)">
+          <span id="apiCallsLeft2">—</span> calls left
+        </span>
+      </div>
+
+      <div class="grid grid-cols-2 gap-4">
+        <!-- Odds Regions -->
+        <div>
+          <label class="block text-sm font-medium mb-1.5" style="color:var(--text-1)">Odds Regions</label>
+          <select id="oddsRegions" class="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+            style="background:var(--bg-base); border-color:var(--border2); color:var(--text-1)">
+            <option value="us,uk,eu,au">All Regions</option>
+            <option value="uk,eu">UK / Europe</option>
+            <option value="us">US Only</option>
+            <option value="us,uk">US + UK</option>
+          </select>
+        </div>
+
+        <!-- Min Edge -->
+        <div>
+          <label class="block text-sm font-medium mb-1.5" style="color:var(--text-1)">
+            Min Edge <span class="mono text-xs" id="minEdgeLabel" style="color:var(--green)">0%</span>
+          </label>
+          <input id="minEdge" type="range" min="-10" max="15" value="0" step="0.5"
+            class="w-full mt-1" style="accent-color:var(--green)" />
+        </div>
+      </div>
+
+      <!-- Auto-refresh -->
+      <div>
+        <label class="block text-sm font-medium mb-1.5" style="color:var(--text-1)">Auto-Refresh Interval</label>
+        <select id="refreshInterval" class="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+          style="background:var(--bg-base); border-color:var(--border2); color:var(--text-1)">
+          <option value="0">Off (Manual only)</option>
+          <option value="15">Every 15 minutes</option>
+          <option value="30" selected>Every 30 minutes</option>
+          <option value="60">Every 60 minutes</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="flex gap-3 p-6 pt-0">
+      <button id="saveSettings" class="flex-1 py-2.5 rounded-xl font-semibold text-sm transition"
+        style="background:var(--green); color:#000">
+        Save &amp; Refresh
+      </button>
+      <button id="clearHistory" class="px-4 py-2.5 rounded-xl border text-sm transition hover:bg-white/5"
+        style="border-color:var(--border2); color:var(--text-2)">
+        Clear History
+      </button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ============================================================
+     MAIN APP (always visible — no setup gate)
+============================================================ -->
+<div id="mainApp">
+
+  <!-- HEADER -->
+  <header class="sticky top-0 z-30 border-b" style="background:rgba(8,13,26,0.95); border-color:var(--border); backdrop-filter:blur(10px)">
+    <div class="max-w-screen-xl mx-auto px-4 h-14 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background:rgba(0,232,122,0.15); border:1px solid rgba(0,232,122,0.3)">
+          <i class="fas fa-futbol text-sm" style="color:var(--green)"></i>
+        </div>
+        <span class="font-bold text-white text-sm tracking-wide">EPL<span style="color:var(--green)">EDGE</span></span>
+        <span class="hidden sm:inline text-xs px-2 py-0.5 rounded-full" style="background:rgba(0,232,122,0.1); color:var(--green); border:1px solid rgba(0,232,122,0.2)">LIVE</span>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <select id="dateFilter" class="px-3 py-1.5 rounded-lg text-xs border outline-none hidden sm:block"
+          style="background:var(--bg-card2); border-color:var(--border2); color:var(--text-1)">
+          <option value="1">Today</option>
+          <option value="3">Next 3 days</option>
+          <option value="7" selected>Next 7 days</option>
+          <option value="14">Next 14 days</option>
+          <option value="99">All upcoming</option>
+        </select>
+        <select id="sortBy" class="px-3 py-1.5 rounded-lg text-xs border outline-none hidden sm:block"
+          style="background:var(--bg-card2); border-color:var(--border2); color:var(--text-1)">
+          <option value="edge">Sort: Best Edge</option>
+          <option value="date">Sort: Date</option>
+          <option value="confidence">Sort: Confidence</option>
+        </select>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <div id="apiCallsBadge" class="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs"
+          style="background:var(--bg-card2); border:1px solid var(--border); color:var(--text-2)">
+          <i class="fas fa-database text-xs" style="color:var(--text-3)"></i>
+          <span id="apiCallsLeft">—</span> calls left
+        </div>
+        <div id="lastUpdatedBadge" class="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs"
+          style="background:var(--bg-card2); border:1px solid var(--border); color:var(--text-2)">
+          <span class="w-1.5 h-1.5 rounded-full pulse-dot" style="background:var(--green)"></span>
+          <span id="lastUpdatedText">—</span>
+        </div>
+        <button id="refreshBtn" class="px-3 py-1.5 rounded-lg text-xs font-medium border transition hover:bg-white/5"
+          style="border-color:var(--border2); color:var(--text-1)">
+          <i class="fas fa-sync-alt mr-1.5" id="refreshIcon"></i>Refresh
+        </button>
+        <button id="settingsBtn" class="w-8 h-8 flex items-center justify-center rounded-lg border transition hover:bg-white/5"
+          style="border-color:var(--border2); color:var(--text-2)">
+          <i class="fas fa-cog"></i>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- STATS BAR -->
+  <div style="background:var(--bg-card); border-bottom:1px solid var(--border)">
+    <div class="max-w-screen-xl mx-auto px-4 py-3 grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div class="text-center">
+        <div class="text-xs mb-0.5" style="color:var(--text-3)">Games Analysed</div>
+        <div class="font-bold text-lg mono" id="statGames">—</div>
+      </div>
+      <div class="text-center">
+        <div class="text-xs mb-0.5" style="color:var(--text-3)">Best Edge Found</div>
+        <div class="font-bold text-lg mono" id="statBestEdge" style="color:var(--green)">—</div>
+      </div>
+      <div class="text-center">
+        <div class="text-xs mb-0.5" style="color:var(--text-3)">Value Bets (&gt;2%)</div>
+        <div class="font-bold text-lg mono" id="statValueBets">—</div>
+      </div>
+      <div class="text-center">
+        <div class="text-xs mb-0.5" style="color:var(--text-3)">Bookmakers Tracked</div>
+        <div class="font-bold text-lg mono" id="statBooks">—</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MAIN CONTENT -->
+  <main class="max-w-screen-xl mx-auto px-4 py-6 space-y-6">
+
+    <!-- ERROR BANNER -->
+    <div id="errorBanner" class="hidden rounded-xl p-4 border" style="background:rgba(255,71,87,0.1); border-color:rgba(255,71,87,0.3)">
+      <div class="flex items-start gap-3">
+        <i class="fas fa-exclamation-triangle mt-0.5" style="color:var(--red)"></i>
+        <div>
+          <p class="font-medium text-sm text-white" id="errorTitle">Error</p>
+          <p class="text-sm mt-0.5" style="color:var(--text-2)" id="errorMsg"></p>
+        </div>
+        <button id="dismissError" class="ml-auto" style="color:var(--text-3)"><i class="fas fa-times"></i></button>
+      </div>
+    </div>
+
+    <!-- TOP PICKS -->
+    <section>
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center gap-2">
+          <i class="fas fa-star text-sm" style="color:var(--yellow)"></i>
+          <h2 class="font-bold text-white">Top Value Bets</h2>
+          <span class="text-xs px-2 py-0.5 rounded-full" style="background:rgba(245,197,24,0.12); color:var(--yellow); border:1px solid rgba(245,197,24,0.25)">Ranked by Edge</span>
+        </div>
+        <div class="text-xs" style="color:var(--text-3)">
+          <i class="fas fa-info-circle mr-1"></i>Edge = model prob − break-even prob
+        </div>
+      </div>
+      <div id="topPicksGrid" class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div class="skeleton h-44 rounded-xl"></div>
+        <div class="skeleton h-44 rounded-xl"></div>
+        <div class="skeleton h-44 rounded-xl"></div>
+      </div>
+    </section>
+
+    <!-- HOW EDGE IS CALCULATED -->
+    <details class="rounded-xl border p-4 cursor-pointer" style="background:var(--bg-card); border-color:var(--border)">
+      <summary class="text-sm font-medium" style="color:var(--text-2)">
+        <i class="fas fa-calculator mr-1.5" style="color:var(--blue)"></i>How is Edge calculated?
+      </summary>
+      <div class="mt-3 text-sm space-y-2" style="color:var(--text-2)">
+        <p><strong style="color:var(--text-1)">Step 1 — No-Vig Probability:</strong> Strip the overround from each bookmaker to get their true implied probability for each outcome.</p>
+        <p><strong style="color:var(--text-1)">Step 2 — Consensus Model:</strong> Average no-vig probabilities across all tracked bookmakers — a wisdom-of-crowds estimate of true probability.</p>
+        <p><strong style="color:var(--text-1)">Step 3 — Home Advantage:</strong> Apply +2.5% to the home team based on EPL historical averages (~44% home win rate).</p>
+        <p><strong style="color:var(--text-1)">Step 4 — Edge:</strong> <span class="mono text-xs px-1 py-0.5 rounded" style="background:var(--bg-card2)">Edge % = (Model Prob − Break-even Prob) × 100</span>. Positive = the odds offer more than you need to break even.</p>
+        <p><strong style="color:var(--text-1)">Step 5 — Line Movement:</strong> Odds are snapshotted to localStorage. Shifts indicate where sharp money is moving.</p>
+      </div>
+    </details>
+
+    <!-- FIXTURES TABLE -->
+    <section>
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+        <div class="flex items-center gap-2">
+          <i class="fas fa-table text-sm" style="color:var(--blue)"></i>
+          <h2 class="font-bold text-white">All Upcoming Fixtures</h2>
+        </div>
+        <div class="flex gap-1 rounded-lg p-1" style="background:var(--bg-card2)">
+          <button class="tab-btn active px-3 py-1 text-xs font-medium rounded-md" data-tab="all" style="color:var(--text-1)">All Fixtures</button>
+          <button class="tab-btn px-3 py-1 text-xs font-medium rounded-md" data-tab="value" style="color:var(--text-2)">Value Bets Only</button>
+        </div>
+      </div>
+
+      <div class="rounded-xl border overflow-hidden" style="background:var(--bg-card); border-color:var(--border)">
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr style="background:var(--bg-card2); border-bottom:1px solid var(--border)">
+                <th class="text-left px-4 py-3 text-xs font-semibold" style="color:var(--text-2)">Date &amp; Time</th>
+                <th class="text-left px-4 py-3 text-xs font-semibold" style="color:var(--text-2)">Match</th>
+                <th class="text-center px-3 py-3 text-xs font-semibold" style="color:var(--text-2)">
+                  <span class="tooltip">Home<span class="tip">Best available Home win odds</span></span>
+                </th>
+                <th class="text-center px-3 py-3 text-xs font-semibold" style="color:var(--text-2)">
+                  <span class="tooltip">Draw<span class="tip">Best available Draw odds</span></span>
+                </th>
+                <th class="text-center px-3 py-3 text-xs font-semibold" style="color:var(--text-2)">
+                  <span class="tooltip">Away<span class="tip">Best available Away win odds</span></span>
+                </th>
+                <th class="text-center px-3 py-3 text-xs font-semibold" style="color:var(--text-2)">
+                  <span class="tooltip">Best Edge<span class="tip">Highest edge across H/D/A</span></span>
+                </th>
+                <th class="text-center px-3 py-3 text-xs font-semibold" style="color:var(--text-2)">
+                  <span class="tooltip">Confidence<span class="tip">Books sampled + edge magnitude</span></span>
+                </th>
+                <th class="text-center px-3 py-3 text-xs font-semibold" style="color:var(--text-2)">
+                  <span class="tooltip">Movement<span class="tip">Line shift since first tracked</span></span>
+                </th>
+                <th class="text-center px-3 py-3 text-xs font-semibold" style="color:var(--text-2)">Books</th>
+              </tr>
+            </thead>
+            <tbody id="fixturesBody">
+              <tr><td colspan="9" class="px-4 py-8 text-center" style="color:var(--text-3)">
+                <i class="fas fa-circle-notch spinner mr-2"></i>Loading fixtures…
+              </td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div id="emptyState" class="hidden px-4 py-12 text-center">
+          <i class="fas fa-search text-3xl mb-3" style="color:var(--text-3)"></i>
+          <p class="font-medium" style="color:var(--text-2)">No fixtures found</p>
+          <p class="text-sm mt-1" style="color:var(--text-3)">Try expanding the date range or adjusting the edge filter.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- DETAIL PANEL -->
+    <div id="detailPanel" class="hidden rounded-xl border p-5 space-y-4" style="background:var(--bg-card); border-color:var(--border2)">
+      <div class="flex items-center justify-between">
+        <h3 id="detailTitle" class="font-bold text-white"></h3>
+        <button id="closeDetail" style="color:var(--text-3)"><i class="fas fa-times"></i></button>
+      </div>
+      <div id="detailContent"></div>
+    </div>
+
+  </main>
+
+  <footer class="max-w-screen-xl mx-auto px-4 py-6 border-t mt-4" style="border-color:var(--border)">
+    <div class="flex flex-wrap items-center justify-between gap-4 text-xs" style="color:var(--text-3)">
+      <div>
+        EPL Edge Finder · Powered by <a href="https://the-odds-api.com" target="_blank" class="underline" style="color:var(--blue)">The Odds API</a>
+        · For informational use only. Gamble responsibly.
+      </div>
+      <div class="flex items-center gap-4">
+        <span>Next auto-refresh: <span id="autoRefreshCountdown" class="mono" style="color:var(--text-2)">—</span></span>
+        <a href="https://www.begambleaware.org" target="_blank" class="underline">BeGambleAware</a>
+      </div>
+    </div>
+  </footer>
+
+</div><!-- /mainApp -->
+
+
+<!-- ============================================================
+     JAVASCRIPT
+============================================================ -->
+<script>
+'use strict';
+
+const EPL_TEAM_IDS = {
+  'Arsenal': 42, 'Aston Villa': 66, 'Bournemouth': 35, 'Brentford': 55,
+  'Brighton': 51, 'Brighton & Hove Albion': 51, 'Chelsea': 49,
+  'Crystal Palace': 52, 'Everton': 45, 'Fulham': 36, 'Ipswich': 57,
+  'Ipswich Town': 57, 'Leicester': 46, 'Leicester City': 46,
+  'Liverpool': 40, 'Manchester City': 50, 'Man City': 50,
+  'Manchester United': 33, 'Man United': 33, 'Newcastle': 34,
+  'Newcastle United': 34, 'Nottingham Forest': 65, "Nott'm Forest": 65,
+  'Southampton': 41, 'Tottenham': 47, 'Tottenham Hotspur': 47,
+  'West Ham': 48, 'West Ham United': 48, 'Wolves': 39, 'Wolverhampton': 39
+};
+
+const CONFIG_KEY  = 'eplEdgeConfig';
+const HISTORY_KEY = 'eplEdgeOddsHistory';
+const FORM_KEY    = 'eplEdgeFormCache';
+
+let config = {
+  regions:         'us,uk,eu,au',
+  minEdge:         0,
+  refreshInterval: 30,
+};
+
+let state = {
+  games:            [],
+  isLoading:        false,
+  lastUpdated:      null,
+  apiCallsLeft:     null,
+  oddsHistory:      {},
+  formCache:        {},
+  activeTab:        'all',
+  sortBy:           'edge',
+  autoRefreshTimer: null,
+  countdownTimer:   null,
+  nextRefresh:      null,
+};
+
+// ─── Helpers ──────────────────────────────────────────────────
+const avg   = arr => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+function decToAmerican(d) {
+  return d >= 2 ? `+${Math.round((d - 1) * 100)}` : `${Math.round(-100 / (d - 1))}`;
+}
+function fmtDecimal(d)  { return d ? d.toFixed(2) : '—'; }
+function fmtPct(p)      { return isNaN(p) ? '—' : `${(p * 100).toFixed(1)}%`; }
+
+function fmtDate(iso) {
+  const d = new Date(iso);
+  const diffDays = Math.floor((d - Date.now()) / 86400000);
+  const dayName = diffDays === 0 ? 'Today'
+                : diffDays === 1 ? 'Tomorrow'
+                : d.toLocaleDateString('en-GB', { weekday: 'short', month: 'short', day: 'numeric' });
+  return {
+    day:  dayName,
+    time: d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+    full: d.toLocaleString('en-GB', { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+    raw:  d,
+  };
+}
+
+function timeSince(iso) {
+  const secs = Math.floor((Date.now() - new Date(iso)) / 1000);
+  if (secs < 60)   return `${secs}s ago`;
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+  return `${Math.floor(secs / 3600)}h ago`;
+}
+
+// ─── Config persistence ───────────────────────────────────────
+function loadConfig() {
+  try { config = { ...config, ...JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}') }; } catch (_) {}
+}
+function saveConfig() {
+  try { localStorage.setItem(CONFIG_KEY, JSON.stringify(config)); } catch (_) {}
+}
+function loadHistory() {
+  try { state.oddsHistory = JSON.parse(localStorage.getItem(HISTORY_KEY) || '{}'); } catch (_) {}
+}
+function saveHistory() {
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(state.oddsHistory)); } catch (_) {}
+}
+function loadFormCache() {
+  try { state.formCache = JSON.parse(localStorage.getItem(FORM_KEY) || '{}'); } catch (_) {}
+}
+function saveFormCache() {
+  try { localStorage.setItem(FORM_KEY, JSON.stringify(state.formCache)); } catch (_) {}
+}
+
+// ─── API calls (go through Express proxy) ────────────────────
+async function fetchOdds() {
+  const res = await fetch(`/api/odds?regions=${config.regions}&markets=h2h&oddsFormat=decimal`);
+  state.apiCallsLeft = res.headers.get('x-requests-remaining');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || `Server error ${res.status}`);
+  }
+  return res.json();
+}
+
+async function fetchFormData(teamId) {
+  if (!teamId) return null;
+  const cacheKey = `form_${teamId}`;
+  const cached   = state.formCache[cacheKey];
+  if (cached && Date.now() - cached.ts < 6 * 3600 * 1000) return cached.data;
+  try {
+    const res = await fetch(`/api/form/${teamId}`);
+    if (!res.ok) return null;
+    const json = await res.json();
+    if (!json.response) return null;
+    state.formCache[cacheKey] = { ts: Date.now(), data: json.response };
+    saveFormCache();
+    return json.response;
+  } catch (_) { return null; }
+}
+
+async function fetchH2H(homeId, awayId) {
+  if (!homeId || !awayId) return null;
+  const cacheKey = `h2h_${homeId}_${awayId}`;
+  const cached   = state.formCache[cacheKey];
+  if (cached && Date.now() - cached.ts < 24 * 3600 * 1000) return cached.data;
+  try {
+    const res = await fetch(`/api/h2h/${homeId}/${awayId}`);
+    if (!res.ok) return null;
+    const json = await res.json();
+    const data = json.response || [];
+    state.formCache[cacheKey] = { ts: Date.now(), data };
+    saveFormCache();
+    return data;
+  } catch (_) { return null; }
+}
+
+// ─── Edge engine ──────────────────────────────────────────────
+function calculateNoVig(homeOdds, drawOdds, awayOdds) {
+  const rH = 1 / homeOdds, rD = 1 / drawOdds, rA = 1 / awayOdds;
+  const tot = rH + rD + rA;
+  return { home: rH / tot, draw: rD / tot, away: rA / tot, vig: tot - 1 };
+}
+
+function calculateEdge(game) {
+  const { bookmakers, home_team, away_team } = game;
+  if (!bookmakers?.length) return null;
+
+  const noVigSets = [];
+  const bestOdds  = { home: 0, draw: 0, away: 0 };
+  const bestBooks = { home: '', draw: '', away: '' };
+  let   totalBooks = 0;
+
+  for (const bk of bookmakers) {
+    const mkt = bk.markets?.find(m => m.key === 'h2h');
+    if (!mkt?.outcomes?.length) continue;
+    const h = mkt.outcomes.find(o => o.name === home_team);
+    const a = mkt.outcomes.find(o => o.name === away_team);
+    const d = mkt.outcomes.find(o => o.name === 'Draw');
+    if (!h || !a || !d) continue;
+    noVigSets.push(calculateNoVig(h.price, d.price, a.price));
+    totalBooks++;
+    if (h.price > bestOdds.home) { bestOdds.home = h.price; bestBooks.home = bk.title; }
+    if (d.price > bestOdds.draw) { bestOdds.draw = d.price; bestBooks.draw = bk.title; }
+    if (a.price > bestOdds.away) { bestOdds.away = a.price; bestBooks.away = bk.title; }
+  }
+
+  if (!noVigSets.length) return null;
+
+  const consensus = {
+    home: avg(noVigSets.map(s => s.home)),
+    draw: avg(noVigSets.map(s => s.draw)),
+    away: avg(noVigSets.map(s => s.away)),
+    avgVig: avg(noVigSets.map(s => s.vig)),
+  };
+
+  const model = {
+    home: clamp(consensus.home + 0.025, 0, 1),
+    draw: clamp(consensus.draw - 0.0125, 0, 1),
+    away: clamp(consensus.away - 0.0125, 0, 1),
+  };
+
+  const breakEven = {
+    home: bestOdds.home > 0 ? 1 / bestOdds.home : 1,
+    draw: bestOdds.draw > 0 ? 1 / bestOdds.draw : 1,
+    away: bestOdds.away > 0 ? 1 / bestOdds.away : 1,
+  };
+
+  const edge = {
+    home: (model.home - breakEven.home) * 100,
+    draw: (model.draw - breakEven.draw) * 100,
+    away: (model.away - breakEven.away) * 100,
+  };
+
+  const outcomes = [
+    { key: 'home', label: `${home_team} Win`, e: edge.home, odds: bestOdds.home, book: bestBooks.home, modelProb: model.home },
+    { key: 'draw', label: 'Draw',             e: edge.draw, odds: bestOdds.draw, book: bestBooks.draw, modelProb: model.draw },
+    { key: 'away', label: `${away_team} Win`, e: edge.away, odds: bestOdds.away, book: bestBooks.away, modelProb: model.away },
+  ].sort((a, b) => b.e - a.e);
+
+  const best = outcomes[0];
+  const confidence = clamp(Math.round((totalBooks / 12) * 50 + clamp(best.e, -5, 15) * 3.33), 0, 100);
+
+  return { consensus, model, bestOdds, bestBooks, breakEven, edge, best, outcomes, totalBooks, confidence, avgVig: consensus.avgVig };
+}
+
+// ─── Line movement ────────────────────────────────────────────
+function trackLineMovement(gameId, currentOdds) {
+  if (!state.oddsHistory[gameId]) {
+    state.oddsHistory[gameId] = { first: { ...currentOdds, ts: Date.now() }, prev: { ...currentOdds, ts: Date.now() } };
+  } else {
+    state.oddsHistory[gameId].prev = { ...currentOdds, ts: Date.now() };
+  }
+}
+
+function getLineMovement(gameId, field) {
+  const h = state.oddsHistory[gameId];
+  if (!h) return { dir: 'flat', delta: 0 };
+  const first = h.first[field] || 0;
+  const curr  = h.prev[field]  || 0;
+  const delta = curr - first;
+  return { dir: Math.abs(delta) < 0.01 ? 'flat' : delta > 0 ? 'up' : 'down', delta: delta.toFixed(2) };
+}
+
+// ─── Tier helpers ─────────────────────────────────────────────
+function edgeTier(e) {
+  if (e >= 5)  return { cls: 'edge-great',  label: 'Great Value',  cardCls: 'pick-card-great'  };
+  if (e >= 2)  return { cls: 'edge-good',   label: 'Good Value',   cardCls: 'pick-card-good'   };
+  if (e >= 0)  return { cls: 'edge-slight', label: 'Slight Edge',  cardCls: 'pick-card-slight' };
+  return         { cls: 'edge-none',   label: 'No Value',    cardCls: ''                 };
+}
+
+function confidenceLabel(c) {
+  if (c >= 75) return { label: 'High',   color: 'var(--green)'  };
+  if (c >= 50) return { label: 'Medium', color: 'var(--yellow)' };
+  return         { label: 'Low',    color: 'var(--red)'    };
+}
+
+// ─── Render: top picks ────────────────────────────────────────
+function renderTopPicks(games) {
+  const container = document.getElementById('topPicksGrid');
+  const allBets = [];
+  for (const g of games) {
+    if (!g._edge) continue;
+    allBets.push({ game: g, bet: g._edge.best, dt: fmtDate(g.commence_time) });
+  }
+  allBets.sort((a, b) => b.bet.e - a.bet.e);
+  const top3 = allBets.slice(0, 3);
+
+  if (!top3.length) {
+    container.innerHTML = `<div class="col-span-3 text-center py-8" style="color:var(--text-3)"><i class="fas fa-search text-2xl mb-2 block"></i>No games loaded yet.</div>`;
+    return;
+  }
+
+  container.innerHTML = top3.map(({ game, bet, dt }, i) => {
+    const tier = edgeTier(bet.e);
+    const conf = confidenceLabel(game._edge.confidence);
+    const rank = ['🥇','🥈','🥉'][i];
+    const mv   = getLineMovement(game.id, bet.key);
+    const mvIcon  = mv.dir === 'up' ? '↑' : mv.dir === 'down' ? '↓' : '→';
+    const mvColor = mv.dir === 'up' ? 'var(--green)' : mv.dir === 'down' ? 'var(--red)' : 'var(--text-3)';
+    return `
+      <div class="rounded-xl border p-5 cursor-pointer hover:scale-[1.01] transition-transform pick-card ${tier.cardCls}"
+        style="background:var(--bg-card); border-color:var(--border)" data-gameid="${game.id}">
+        <div class="flex items-start justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <span class="text-lg">${rank}</span>
+            <span class="text-xs px-2 py-0.5 rounded-full font-medium ${tier.cls}">${tier.label}</span>
+          </div>
+          <span class="text-xs" style="color:var(--text-3)">${dt.day} ${dt.time}</span>
+        </div>
+        <div class="mb-3">
+          <p class="text-xs mb-0.5" style="color:var(--text-2)">${game.home_team} vs ${game.away_team}</p>
+          <p class="font-bold text-white text-base">${bet.label}</p>
+        </div>
+        <div class="flex items-end justify-between">
+          <div>
+            <p class="text-xs mb-0.5" style="color:var(--text-3)">Best Odds</p>
+            <p class="mono font-bold text-lg text-white">${fmtDecimal(bet.odds)}</p>
+            <p class="mono text-xs" style="color:var(--text-2)">${decToAmerican(bet.odds)} · ${bet.book}</p>
+          </div>
+          <div class="text-right">
+            <p class="text-xs mb-0.5" style="color:var(--text-3)">Edge</p>
+            <p class="mono font-bold text-2xl" style="color:${bet.e >= 2 ? 'var(--green)' : bet.e >= 0 ? 'var(--yellow)' : 'var(--red)'}">
+              ${bet.e >= 0 ? '+' : ''}${bet.e.toFixed(1)}%
+            </p>
+          </div>
+        </div>
+        <div class="mt-3 pt-3 border-t flex items-center justify-between" style="border-color:var(--border)">
+          <div class="flex items-center gap-3 text-xs" style="color:var(--text-2)">
+            <span>Model: ${fmtPct(bet.modelProb)}</span>
+            <span style="color:var(--text-3)">·</span>
+            <span style="color:${conf.color}">Conf: ${conf.label}</span>
+          </div>
+          <span class="mono text-xs font-medium" style="color:${mvColor}">${mvIcon} ${mv.delta !== '0.00' ? mv.delta : 'flat'}</span>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// ─── Render: fixtures table ───────────────────────────────────
+function renderFixtures(games) {
+  const body  = document.getElementById('fixturesBody');
+  const empty = document.getElementById('emptyState');
+
+  let filtered = games;
+  if (state.activeTab === 'value') filtered = games.filter(g => g._edge && g._edge.best.e >= config.minEdge);
+
+  const maxDays = parseInt(document.getElementById('dateFilter').value) || 7;
+  const cutoff  = Date.now() + maxDays * 86400000;
+  filtered = filtered.filter(g => new Date(g.commence_time).getTime() <= cutoff);
+
+  const sortKey = document.getElementById('sortBy').value;
+  filtered.sort((a, b) => {
+    if (sortKey === 'date')       return new Date(a.commence_time) - new Date(b.commence_time);
+    if (sortKey === 'confidence') return (b._edge?.confidence || 0) - (a._edge?.confidence || 0);
+    return (b._edge?.best.e || -99) - (a._edge?.best.e || -99);
+  });
+
+  if (!filtered.length) { body.innerHTML = ''; empty.classList.remove('hidden'); return; }
+  empty.classList.add('hidden');
+
+  body.innerHTML = filtered.map(g => {
+    const dt   = fmtDate(g.commence_time);
+    const edge = g._edge;
+    if (!edge) return `
+      <tr class="border-t fixture-row" style="border-color:var(--border)">
+        <td class="px-4 py-3 text-xs" style="color:var(--text-3)">${dt.day}<br/>${dt.time}</td>
+        <td class="px-4 py-3 font-medium">${g.home_team} <span style="color:var(--text-3)">vs</span> ${g.away_team}</td>
+        <td colspan="7" class="px-4 py-3 text-xs text-center" style="color:var(--text-3)">No odds available</td>
+      </tr>`;
+
+    const tier = edgeTier(edge.best.e);
+    const conf = confidenceLabel(edge.confidence);
+    const mvH  = getLineMovement(g.id, 'home');
+    const mvD  = getLineMovement(g.id, 'draw');
+    const mvA  = getLineMovement(g.id, 'away');
+    const mvBest = getLineMovement(g.id, edge.best.key);
+    const mvIcon  = mvBest.dir === 'up' ? '↑' : mvBest.dir === 'down' ? '↓' : '→';
+    const mvClass = mvBest.dir === 'up' ? 'move-up' : mvBest.dir === 'down' ? 'move-down' : 'move-flat';
+
+    function oddsCell(odds, highlight, mv) {
+      const arrow = mv.dir === 'up' ? `<span class="move-up text-xs">↑</span>` : mv.dir === 'down' ? `<span class="move-down text-xs">↓</span>` : '';
+      return `<td class="px-3 py-3 text-center">
+        <span class="mono text-sm font-${highlight ? 'bold' : 'normal'}" style="color:${highlight ? 'var(--text-1)' : 'var(--text-2)'}">
+          ${fmtDecimal(odds)} ${arrow}
+        </span>
+      </td>`;
+    }
+
+    return `
+      <tr class="border-t fixture-row cursor-pointer" style="border-color:var(--border)" data-gameid="${g.id}">
+        <td class="px-4 py-3">
+          <p class="text-xs font-medium" style="color:${dt.day === 'Today' ? 'var(--green)' : 'var(--text-1)'}">${dt.day}</p>
+          <p class="text-xs mono" style="color:var(--text-3)">${dt.time}</p>
+        </td>
+        <td class="px-4 py-3">
+          <p class="font-medium text-sm">${g.home_team}</p>
+          <p class="text-xs" style="color:var(--text-3)">vs ${g.away_team}</p>
+        </td>
+        ${oddsCell(edge.bestOdds.home, edge.best.key === 'home', mvH)}
+        ${oddsCell(edge.bestOdds.draw, edge.best.key === 'draw', mvD)}
+        ${oddsCell(edge.bestOdds.away, edge.best.key === 'away', mvA)}
+        <td class="px-3 py-3 text-center">
+          <span class="inline-block px-2.5 py-1 rounded-lg text-xs font-bold mono ${tier.cls}">
+            ${edge.best.e >= 0 ? '+' : ''}${edge.best.e.toFixed(1)}%
+          </span>
+          <p class="text-xs mt-0.5" style="color:var(--text-3)">${edge.best.key === 'home' ? g.home_team.split(' ').pop() : edge.best.key === 'away' ? g.away_team.split(' ').pop() : 'Draw'}</p>
+        </td>
+        <td class="px-3 py-3 text-center">
+          <div class="flex flex-col items-center gap-1">
+            <div class="w-16 h-1.5 rounded-full overflow-hidden" style="background:var(--border)">
+              <div class="h-full rounded-full edge-bar" style="width:${edge.confidence}%; background:${conf.color}"></div>
+            </div>
+            <span class="text-xs" style="color:${conf.color}">${conf.label}</span>
+          </div>
+        </td>
+        <td class="px-3 py-3 text-center">
+          <span class="mono text-sm ${mvClass}">${mvIcon}</span>
+          ${mvBest.delta !== '0.00' ? `<p class="mono text-xs" style="color:var(--text-3)">${mvBest.delta}</p>` : ''}
+        </td>
+        <td class="px-3 py-3 text-center">
+          <span class="mono text-xs px-2 py-1 rounded-md" style="background:var(--bg-card2); color:var(--text-2)">${edge.totalBooks}</span>
+        </td>
+      </tr>`;
+  }).join('');
+
+  document.querySelectorAll('tr[data-gameid]').forEach(row => {
+    row.addEventListener('click', () => showDetail(row.dataset.gameid));
+  });
+}
+
+// ─── Detail panel ─────────────────────────────────────────────
+async function showDetail(gameId) {
+  const game = state.games.find(g => g.id === gameId);
+  if (!game || !game._edge) return;
+
+  const panel   = document.getElementById('detailPanel');
+  const title   = document.getElementById('detailTitle');
+  const content = document.getElementById('detailContent');
+  const edge    = game._edge;
+  const dt      = fmtDate(game.commence_time);
+
+  title.textContent = `${game.home_team} vs ${game.away_team} — ${dt.full}`;
+  panel.classList.remove('hidden');
+  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+  content.innerHTML = `<p class="text-xs" style="color:var(--text-3)"><i class="fas fa-circle-notch spinner mr-1"></i>Loading detail…</p>`;
+
+  const outRows = edge.outcomes.map(o => {
+    const tier = edgeTier(o.e);
+    return `
+      <div class="flex items-center gap-3 py-2 border-b" style="border-color:var(--border)">
+        <div class="w-36 text-sm font-medium truncate">${o.label}</div>
+        <div class="flex-1">
+          <div class="flex items-center gap-2 mb-1">
+            <div class="flex-1 h-1.5 rounded-full overflow-hidden" style="background:var(--border)">
+              <div class="h-full rounded-full" style="width:${edge.model[o.key] * 100}%; background:var(--blue)"></div>
+            </div>
+            <span class="mono text-xs w-12 text-right" style="color:var(--text-2)">${fmtPct(edge.model[o.key])}</span>
+          </div>
+          <span class="text-xs" style="color:var(--text-3)">Best: <span class="mono">${fmtDecimal(o.odds)}</span> (${decToAmerican(o.odds)}) @ ${o.book}</span>
+        </div>
+        <span class="ml-2 px-2.5 py-1 rounded-lg text-xs font-bold mono ${tier.cls}">${o.e >= 0 ? '+' : ''}${o.e.toFixed(1)}%</span>
+      </div>`;
+  }).join('');
+
+  const bookRows = game.bookmakers.map(bk => {
+    const mkt = bk.markets?.find(m => m.key === 'h2h');
+    if (!mkt) return '';
+    const h = mkt.outcomes.find(o => o.name === game.home_team)?.price || 0;
+    const d = mkt.outcomes.find(o => o.name === 'Draw')?.price || 0;
+    const a = mkt.outcomes.find(o => o.name === game.away_team)?.price || 0;
+    if (!h || !d || !a) return '';
+    const nv  = calculateNoVig(h, d, a);
+    const vig = (nv.vig * 100).toFixed(2);
+    return `
+      <tr class="border-t" style="border-color:var(--border)">
+        <td class="py-2 pr-4 text-sm font-medium">${bk.title}</td>
+        <td class="py-2 px-3 text-center mono text-sm" style="color:${edge.bestBooks.home === bk.title ? 'var(--green)' : 'var(--text-2)'}; font-weight:${edge.bestBooks.home === bk.title ? 'bold' : 'normal'}">${fmtDecimal(h)}</td>
+        <td class="py-2 px-3 text-center mono text-sm" style="color:${edge.bestBooks.draw === bk.title ? 'var(--green)' : 'var(--text-2)'}; font-weight:${edge.bestBooks.draw === bk.title ? 'bold' : 'normal'}">${fmtDecimal(d)}</td>
+        <td class="py-2 px-3 text-center mono text-sm" style="color:${edge.bestBooks.away === bk.title ? 'var(--green)' : 'var(--text-2)'}; font-weight:${edge.bestBooks.away === bk.title ? 'bold' : 'normal'}">${fmtDecimal(a)}</td>
+        <td class="py-2 px-3 text-center text-xs mono" style="color:var(--text-3)">${vig}%</td>
+      </tr>`;
+  }).join('');
+
+  // Try to fetch form & H2H (server returns 501 gracefully if Football API key not set)
+  const homeId = EPL_TEAM_IDS[game.home_team];
+  const awayId = EPL_TEAM_IDS[game.away_team];
+  const [homeStats, awayStats, h2hData] = await Promise.all([
+    fetchFormData(homeId),
+    fetchFormData(awayId),
+    fetchH2H(homeId, awayId),
+  ]);
+
+  function parseForm(s) {
+    if (!s?.fixtures) return null;
+    const { wins, draws, loses } = s.fixtures;
+    const total = (wins.total||0)+(draws.total||0)+(loses.total||0);
+    if (!total) return null;
+    return { winPct: wins.total/total, form: s.form||'', homeWinPct: wins.home/Math.max(wins.home+draws.home+loses.home,1), awayWinPct: wins.away/Math.max(wins.away+draws.away+loses.away,1) };
+  }
+
+  function parseH2H(fixtures) {
+    if (!fixtures?.length) return null;
+    let hw=0, d=0, aw=0;
+    fixtures.forEach(f => {
+      const hg=f.goals.home, ag=f.goals.away;
+      if (hg>ag) { if(f.teams.home.name===game.home_team) hw++; else aw++; }
+      else if (hg<ag) { if(f.teams.away.name===game.home_team) hw++; else aw++; }
+      else d++;
+    });
+    return { homeWins:hw, draws:d, awayWins:aw, total:fixtures.length };
+  }
+
+  function formPips(str) {
+    if (!str) return '<span style="color:var(--text-3)">—</span>';
+    return str.slice(-5).split('').map(c => {
+      const col = c==='W' ? 'var(--green)' : c==='D' ? 'var(--yellow)' : 'var(--red)';
+      return `<span class="inline-flex w-5 h-5 text-xs font-bold rounded items-center justify-center" style="background:${col}20;color:${col}">${c}</span>`;
+    }).join('');
+  }
+
+  const hf  = parseForm(homeStats);
+  const af  = parseForm(awayStats);
+  const h2h = parseH2H(h2hData);
+
+  const formHtml = (homeStats || awayStats || h2hData) ? `
+    <div class="mt-4 pt-4 border-t" style="border-color:var(--border)">
+      <h4 class="text-sm font-semibold mb-3 text-white"><i class="fas fa-chart-line mr-1.5" style="color:var(--blue)"></i>Form &amp; H2H</h4>
+      <div class="grid grid-cols-3 gap-4 text-center">
+        <div class="rounded-lg p-3" style="background:var(--bg-card2)">
+          <p class="text-xs mb-2" style="color:var(--text-3)">${game.home_team}</p>
+          <div class="flex gap-0.5 justify-center">${formPips(hf?.form)}</div>
+          ${hf ? `<p class="text-xs mt-2" style="color:var(--text-2)">Home W%: <span class="mono" style="color:var(--text-1)">${fmtPct(hf.homeWinPct)}</span></p>` : '<p class="text-xs mt-2" style="color:var(--text-3)">No data</p>'}
+        </div>
+        <div class="rounded-lg p-3" style="background:var(--bg-card2)">
+          <p class="text-xs mb-2" style="color:var(--text-3)">H2H (last ${h2h?.total||0})</p>
+          ${h2h ? `<div class="flex justify-center gap-4 text-sm">
+            <div><p class="mono font-bold" style="color:var(--green)">${h2h.homeWins}</p><p class="text-xs" style="color:var(--text-3)">H</p></div>
+            <div><p class="mono font-bold" style="color:var(--yellow)">${h2h.draws}</p><p class="text-xs" style="color:var(--text-3)">D</p></div>
+            <div><p class="mono font-bold" style="color:var(--red)">${h2h.awayWins}</p><p class="text-xs" style="color:var(--text-3)">A</p></div>
+          </div>` : '<p class="text-xs mt-2" style="color:var(--text-3)">No data</p>'}
+        </div>
+        <div class="rounded-lg p-3" style="background:var(--bg-card2)">
+          <p class="text-xs mb-2" style="color:var(--text-3)">${game.away_team}</p>
+          <div class="flex gap-0.5 justify-center">${formPips(af?.form)}</div>
+          ${af ? `<p class="text-xs mt-2" style="color:var(--text-2)">Away W%: <span class="mono" style="color:var(--text-1)">${fmtPct(af.awayWinPct)}</span></p>` : '<p class="text-xs mt-2" style="color:var(--text-3)">No data</p>'}
+        </div>
+      </div>
+    </div>` : '';
+
+  content.innerHTML = `
+    <div class="mb-4">
+      <h4 class="text-sm font-semibold mb-2 text-white"><i class="fas fa-balance-scale mr-1.5" style="color:var(--green)"></i>Outcome Analysis</h4>
+      ${outRows}
+    </div>
+    <div class="overflow-x-auto">
+      <h4 class="text-sm font-semibold mb-2 text-white"><i class="fas fa-list mr-1.5" style="color:var(--yellow)"></i>All Bookmakers</h4>
+      <table class="w-full text-sm">
+        <thead><tr style="color:var(--text-3)">
+          <th class="text-left pb-2 pr-4 text-xs">Book</th>
+          <th class="text-center pb-2 px-3 text-xs">Home</th>
+          <th class="text-center pb-2 px-3 text-xs">Draw</th>
+          <th class="text-center pb-2 px-3 text-xs">Away</th>
+          <th class="text-center pb-2 px-3 text-xs">Vig</th>
+        </tr></thead>
+        <tbody>${bookRows}</tbody>
+      </table>
+    </div>
+    <div class="mt-4 rounded-lg p-3 flex flex-wrap gap-6" style="background:var(--bg-card2)">
+      <div><p class="text-xs mb-0.5" style="color:var(--text-3)">Avg Vig</p><p class="mono font-medium">${((edge.avgVig||0)*100).toFixed(2)}%</p></div>
+      <div><p class="text-xs mb-0.5" style="color:var(--text-3)">Consensus Home</p><p class="mono font-medium">${fmtPct(edge.consensus.home)}</p></div>
+      <div><p class="text-xs mb-0.5" style="color:var(--text-3)">Consensus Draw</p><p class="mono font-medium">${fmtPct(edge.consensus.draw)}</p></div>
+      <div><p class="text-xs mb-0.5" style="color:var(--text-3)">Consensus Away</p><p class="mono font-medium">${fmtPct(edge.consensus.away)}</p></div>
+      <div><p class="text-xs mb-0.5" style="color:var(--text-3)">Books Sampled</p><p class="mono font-medium">${edge.totalBooks}</p></div>
+    </div>
+    ${formHtml}`;
+}
+
+// ─── Stats bar ────────────────────────────────────────────────
+function updateStats(games) {
+  const valueBets = games.filter(g => g._edge && g._edge.best.e >= 2).length;
+  const bestEdge  = Math.max(...games.map(g => g._edge?.best.e || -99), -99);
+  const allBooks  = new Set(); games.forEach(g => g.bookmakers?.forEach(b => allBooks.add(b.key)));
+  document.getElementById('statGames').textContent     = games.length;
+  document.getElementById('statBestEdge').textContent  = bestEdge > -99 ? `+${bestEdge.toFixed(1)}%` : '—';
+  document.getElementById('statValueBets').textContent = valueBets;
+  document.getElementById('statBooks').textContent     = allBooks.size;
+  if (state.apiCallsLeft !== null) {
+    document.getElementById('apiCallsBadge').classList.remove('hidden');
+    document.getElementById('apiCallsLeft').textContent  = state.apiCallsLeft;
+    document.getElementById('apiCallsLeft2').textContent = state.apiCallsLeft;
+  }
+}
+
+// ─── Load data ────────────────────────────────────────────────
+async function loadData() {
+  if (state.isLoading) return;
+  state.isLoading = true;
+  document.getElementById('refreshIcon').classList.add('spinner');
+  showError(false);
+
+  document.getElementById('fixturesBody').innerHTML = `<tr><td colspan="9" class="px-4 py-8 text-center" style="color:var(--text-3)"><i class="fas fa-circle-notch spinner mr-2"></i>Fetching live odds…</td></tr>`;
+  document.getElementById('topPicksGrid').innerHTML = `<div class="skeleton h-44 rounded-xl"></div><div class="skeleton h-44 rounded-xl"></div><div class="skeleton h-44 rounded-xl"></div>`;
+
+  try {
+    const raw   = await fetchOdds();
+    const maxDays = parseInt(document.getElementById('dateFilter').value) || 7;
+    const cutoff  = Date.now() + maxDays * 86400000;
+    const games   = raw.filter(g => new Date(g.commence_time).getTime() <= cutoff);
+
+    for (const g of games) {
+      g._edge = calculateEdge(g);
+      if (g._edge) trackLineMovement(g.id, { home: g._edge.bestOdds.home, draw: g._edge.bestOdds.draw, away: g._edge.bestOdds.away });
+    }
+    saveHistory();
+
+    state.games       = games;
+    state.lastUpdated = new Date().toISOString();
+    updateStats(games);
+    renderTopPicks(games);
+    renderFixtures(games);
+    document.getElementById('lastUpdatedText').textContent = timeSince(state.lastUpdated);
+    document.getElementById('lastUpdatedBadge').classList.remove('hidden');
+    startCountdown();
+  } catch (err) {
+    showError(true, 'Failed to load odds', err.message);
+    document.getElementById('topPicksGrid').innerHTML = '';
+    document.getElementById('fixturesBody').innerHTML = '';
+  }
+
+  state.isLoading = false;
+  document.getElementById('refreshIcon').classList.remove('spinner');
+}
+
+// ─── Auto-refresh countdown ───────────────────────────────────
+function startCountdown() {
+  clearInterval(state.countdownTimer);
+  clearTimeout(state.autoRefreshTimer);
+  if (!config.refreshInterval) { document.getElementById('autoRefreshCountdown').textContent = 'Off'; return; }
+  state.nextRefresh = Date.now() + config.refreshInterval * 60000;
+  state.countdownTimer = setInterval(() => {
+    const rem = Math.max(0, Math.ceil((state.nextRefresh - Date.now()) / 1000));
+    const m = Math.floor(rem / 60), s = rem % 60;
+    document.getElementById('autoRefreshCountdown').textContent = `${m}:${s.toString().padStart(2,'0')}`;
+    if (rem === 0) clearInterval(state.countdownTimer);
+  }, 1000);
+  state.autoRefreshTimer = setTimeout(loadData, config.refreshInterval * 60000);
+}
+
+function showError(show, title='', msg='') {
+  const el = document.getElementById('errorBanner');
+  if (!show) { el.classList.add('hidden'); return; }
+  document.getElementById('errorTitle').textContent = title;
+  document.getElementById('errorMsg').textContent   = msg;
+  el.classList.remove('hidden');
+}
+
+// ─── Settings ─────────────────────────────────────────────────
+function openSettings() {
+  document.getElementById('oddsRegions').value   = config.regions;
+  document.getElementById('minEdge').value        = config.minEdge;
+  document.getElementById('minEdgeLabel').textContent = `${config.minEdge}%`;
+  document.getElementById('refreshInterval').value = config.refreshInterval;
+  document.getElementById('settingsModal').classList.remove('hidden');
+}
+function closeSettings() { document.getElementById('settingsModal').classList.add('hidden'); }
+function saveSettings() {
+  config.regions         = document.getElementById('oddsRegions').value;
+  config.minEdge         = parseFloat(document.getElementById('minEdge').value);
+  config.refreshInterval = parseInt(document.getElementById('refreshInterval').value);
+  saveConfig();
+  closeSettings();
+  loadData();
+}
+
+// ─── Event listeners ──────────────────────────────────────────
+function attachEvents() {
+  document.getElementById('settingsBtn').addEventListener('click', openSettings);
+  document.getElementById('closeSettings').addEventListener('click', closeSettings);
+  document.getElementById('saveSettings').addEventListener('click', saveSettings);
+  document.getElementById('dismissError').addEventListener('click', () => showError(false));
+  document.getElementById('refreshBtn').addEventListener('click', loadData);
+  document.getElementById('clearHistory').addEventListener('click', () => {
+    state.oddsHistory = {}; state.formCache = {};
+    localStorage.removeItem(HISTORY_KEY); localStorage.removeItem(FORM_KEY);
+    closeSettings(); alert('History cleared.');
+  });
+  document.getElementById('minEdge').addEventListener('input', e => {
+    document.getElementById('minEdgeLabel').textContent = `${e.target.value}%`;
+  });
+  document.getElementById('dateFilter').addEventListener('change', () => { renderFixtures(state.games); renderTopPicks(state.games); });
+  document.getElementById('sortBy').addEventListener('change', () => renderFixtures(state.games));
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach(b => { b.classList.remove('active'); b.style.color = 'var(--text-2)'; });
+      btn.classList.add('active'); btn.style.color = 'var(--text-1)';
+      state.activeTab = btn.dataset.tab; renderFixtures(state.games);
+    });
+  });
+  document.getElementById('closeDetail').addEventListener('click', () => document.getElementById('detailPanel').classList.add('hidden'));
+  document.addEventListener('click', e => { const c = e.target.closest('.pick-card'); if (c) showDetail(c.dataset.gameid); });
+  setInterval(() => { if (state.lastUpdated) document.getElementById('lastUpdatedText').textContent = timeSince(state.lastUpdated); }, 60000);
+}
+
+// ─── Boot ─────────────────────────────────────────────────────
+(function init() {
+  loadConfig(); loadHistory(); loadFormCache();
+  attachEvents();
+  loadData();
+})();
+</script>
+</body>
+</html>

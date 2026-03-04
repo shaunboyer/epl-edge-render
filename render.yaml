@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: epl-edge-finder
+    runtime: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: ODDS_API_KEY
+        sync: false          # You will enter this in the Render dashboard
+      - key: FOOTBALL_API_KEY
+        sync: false          # Optional — enables H2H & form data

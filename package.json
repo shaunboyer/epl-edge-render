@@ -1,0 +1,17 @@
+{
+  "name": "epl-edge-finder",
+  "version": "1.0.0",
+  "description": "EPL betting edge dashboard — powered by The Odds API",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "axios": "^1.7.7",
+    "express": "^4.21.0"
+  }
+}
